@@ -287,10 +287,18 @@ def main():
             
             for url in activity["liked"][progress["likes"]:]:
                 if check_quota('videos.rate'):
-                    youtube.videos().rate(id=url.split("v=")[1], rating="like").execute()
-                    progress["likes"] += 1
-                    json.dump(progress, open(PROGRESS_FILE, "w"))
-                    time.sleep(API_DELAY)
+                    try:
+                        video_id = url.split("v=")[1]
+                        youtube.videos().rate(id=video_id, rating="like").execute()
+                        print(f"✓ Liked video: {video_id}")  # Confirmation in terminal
+                        progress["likes"] += 1
+                        json.dump(progress, open(PROGRESS_FILE, "w"))
+                        time.sleep(API_DELAY)
+                    except HttpError as e:
+                        if "videoRatingDisabled" in str(e):
+                            print(f"⚠️ Skipping video (ratings disabled): {url}")
+                        else:
+                            print(f"❌ Error liking video {url}: {str(e)}")
 
         # Only remove progress file if all migration targets are fully processed
         all_subs_done = progress["subscriptions"] == len(activity["subscribed"])
