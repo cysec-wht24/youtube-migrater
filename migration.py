@@ -12,14 +12,28 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from tenacity import retry, stop_after_attempt, wait_exponential
 from googleapiclient.errors import HttpError
 
+
+def banner():
+    print(r"""
+     __     ___   __  __ _                 _            
+     \ \   / / | |  \/  (_)               | |           
+      \ \_/ /| |_| \  / |_  __ _ _ __ __ _| |_ ___ _ __ 
+       \   / | __| |\/| | |/ _` | '__/ _` | __/ _ \ '__|
+        | |  | |_| |  | | | (_| | | | (_| | ||  __/ |   
+        |_|   \__|_|  |_|_|\__, |_|  \__,_|\__\___|_|   
+                            __/ |                       
+                           |___/                        
+    """)
+
+
+
 # ---------------------------
 # CONFIGURATION
 # ---------------------------
-BASE_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
-CREDENTIALS_FILE = os.path.join(BASE_DIR, "client_secret.json")
-TAKEOUT_FILE = os.path.join(BASE_DIR, "MyActivity.html")
-PROGRESS_FILE = os.path.join(BASE_DIR, "progress.json")
+TOKEN_FILE = "token.json"
+CREDENTIALS_FILE = "client_secret_8393986395-j3meqchdibd4eiijln71944irmlnadn2.apps.googleusercontent.com.json"
+TAKEOUT_FILE = "./MyActivity.html"
+PROGRESS_FILE = "progress.json"
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
