@@ -15,10 +15,11 @@ from googleapiclient.errors import HttpError
 # ---------------------------
 # CONFIGURATION
 # ---------------------------
-TOKEN_FILE = "token.json"
-CREDENTIALS_FILE = "client_secret_8393986395-j3meqchdibd4eiijln71944irmlnadn2.apps.googleusercontent.com.json"
-TAKEOUT_FILE = "./MyActivity.html"
-PROGRESS_FILE = "progress.json"
+BASE_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
+CREDENTIALS_FILE = os.path.join(BASE_DIR, "client_secret.json")
+TAKEOUT_FILE = os.path.join(BASE_DIR, "MyActivity.html")
+PROGRESS_FILE = os.path.join(BASE_DIR, "progress.json")
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"

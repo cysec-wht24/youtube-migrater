@@ -1,0 +1,17 @@
+[project]
+name = "youtube-migrater"
+version = "0.1.0"
+description = "CLI tool to migrate YouTube subscriptions & likes from Google Takeout"
+authors = [{ name = "Manomay Bisht" }]
+readme = "README.md"
+dependencies = [
+    "google-api-python-client",
+    "google-auth",
+    "google-auth-oauthlib",
+    "beautifulsoup4",
+    "lxml",
+    "tenacity"
+]
+
+[project.scripts]
+youtube-migrater = "cli:main"
