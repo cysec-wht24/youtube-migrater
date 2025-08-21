@@ -13,6 +13,21 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from tenacity import retry, stop_after_attempt, wait_exponential
 from googleapiclient.errors import HttpError
 
+
+def banner():
+    print(r"""
+     __     ___   __  __ _                 _            
+     \ \   / / | |  \/  (_)               | |           
+      \ \_/ /| |_| \  / |_  __ _ _ __ __ _| |_ ___ _ __ 
+       \   / | __| |\/| | |/ _` | '__/ _` | __/ _ \ '__|
+        | |  | |_| |  | | | (_| | | | (_| | ||  __/ |   
+        |_|   \__|_|  |_|_|\__, |_|  \__,_|\__\___|_|   
+                            __/ |                       
+                           |___/                        
+    """)
+
+
+
 # ---------------------------
 # CONFIGURATION
 # ---------------------------
