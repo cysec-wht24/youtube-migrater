@@ -24,3 +24,7 @@ progress.json
 
 # macOS system files
 .DS_Store
+
+# Activity files
+*.html
+
