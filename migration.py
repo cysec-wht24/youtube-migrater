@@ -3,6 +3,7 @@ import re
 import time
 import json
 import datetime
+import requests
 from bs4 import BeautifulSoup
 from typing import Dict, List
 from googleapiclient.discovery import build
@@ -15,43 +16,131 @@ from googleapiclient.errors import HttpError
 # ---------------------------
 # CONFIGURATION
 # ---------------------------
-TOKEN_FILE = "token.json"
-CREDENTIALS_FILE = "client_secret_8393986395-j3meqchdibd4eiijln71944irmlnadn2.apps.googleusercontent.com.json"
-TAKEOUT_FILE = "./MyActivity.html"
-PROGRESS_FILE = "progress.json"
+TOKEN_FILE = os.path.join("data", "token.json")
+CREDENTIALS_FILE = "data/client_secret_8393986395-j3meqchdibd4eiijln71944irmlnadn2.apps.googleusercontent.com.json"
+TAKEOUT_FILE = "data/MyActivity.html"
+PROGRESS_FILE = os.path.join("data", "progress.json")
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 API_DELAY = 5  # Seconds between API calls
 MAX_SUBSCRIPTIONS_PER_RUN = 50  # Conservative default
-QUOTA_LIMIT = 10000  # Daily quota limit
-QUOTA_COSTS = {
-    'channels.list': 1,
-    'subscriptions.insert': 50,
-    'videos.rate': 1,
-    'playlists.insert': 50,
-    'playlistItems.insert': 50
-}
+QUOTA_LIMIT = 10000  # Daily quota limit (default, may vary per project)
+
+
+def banner():
+    # Define color codes
+    ORANGE = "\033[33m"   # Yellow-Orange shade
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
+    RESET = "\033[0m"
+
+    __version__ = "1.0.0"  # Replace with your actual version
+
+    print(rf"""{ORANGE}
+{ORANGE}  __     ___   __  __ _                 _  
+{ORANGE}  \ \   / / | |  \/  (_)               | |      
+{ORANGE}   \ \_/ /| |_| \  / |_  __ _ _ __ __ _| |_ ___ _ __ 
+{ORANGE}    \   / | __| |\/| | |/ _` | '__/ _` | __/ _ \ '__|
+{ORANGE}     | |  | |_| |  | | | (_| | | | (_| | ||  __/ |
+{ORANGE}     |_|   \__|_|  |_|_|\__, |_|  \__,_|\__\___|_|
+{ORANGE}                         __/ |           
+{ORANGE}                        |___/       {RED}Version : {__version__}
+
+{GREEN}[{WHITE}-{GREEN}]{CYAN} Tool Created by Manomay Bisht {WHITE}{RESET}
+    """)
+
+# Example usage
+if __name__ == "__main__":
+    banner()
+
+
+def fetch_quota_costs() -> Dict[str, int]:
+    """
+    Scrape Google's official YouTube Data API quota cost table.
+    Returns a dict mapping method -> quota cost.
+    """
+    url = "https://developers.google.com/youtube/v3/determine_quota_cost"
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        costs = {}
+        for row in soup.select("table tr"):
+            cells = [td.get_text(strip=True) for td in row.find_all("td")]
+            if len(cells) == 2 and cells[1].isdigit():
+                method, cost = cells
+                costs[method] = int(cost)
+        if costs:
+            print("✅ Quota costs fetched dynamically from Google Docs.")
+            return costs
+    except Exception as e:
+        print(f"⚠️ Could not fetch quota costs, falling back to defaults: {e}")
+
+    # fallback hardcoded values
+    return {
+        'channels.list': 1,
+        'subscriptions.insert': 50,
+        'videos.rate': 50,
+        'playlists.insert': 50,
+        'playlistItems.insert': 50
+    }
+
+# Dynamically load quota costs
+QUOTA_COSTS = fetch_quota_costs()
 
 # ---------------------------
 # GLOBAL STATE
 # ---------------------------
 current_quota = 0
-quota_reset_time = datetime.datetime.now() + datetime.timedelta(days=1)
+
+# Reset happens daily at midnight (local system time).
+# You can align with Google's Pacific Time reset if needed.
+def get_next_reset():
+    now = datetime.datetime.now()
+    tomorrow = now + datetime.timedelta(days=1)
+    return datetime.datetime.combine(tomorrow.date(), datetime.time.min)
+
+quota_reset_time = get_next_reset()
+
+
+# ---------------------------
+# QUOTA MANAGEMENT
+# ---------------------------
+def handle_quota_error(e: Exception, operation: str) -> bool:
+    """Centralized quota error handler"""
+    if isinstance(e, HttpError) and "quotaExceeded" in str(e):
+        print(f"❌ Quota exhausted while performing '{operation}'")
+        print(f"🕒 Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        return True  # indicates quota exceeded
+    return False
+
+def check_quota(operation: str) -> bool:
+    global current_quota, quota_reset_time
+    cost = QUOTA_COSTS.get(operation, 50)
+
+    # Reset if needed
+    if datetime.datetime.now() > quota_reset_time:
+        current_quota = 0
+        quota_reset_time = get_next_reset()  # cleaner, reuse your helper
+
+    if current_quota + cost > QUOTA_LIMIT:
+        print(f"❌ Local quota exhausted! Used {current_quota}/{QUOTA_LIMIT}")
+        print(f"🕒 Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        return False
+
+    current_quota += cost
+    return True
 
 # ---------------------------
 # AUTHENTICATION
 # ---------------------------
 def get_authenticated_service():
     """Authenticate and return YouTube API service instance."""
-    global current_quota, quota_reset_time
-    
-    # Reset quota tracking daily
-    if datetime.datetime.now() > quota_reset_time:
-        current_quota = 0
-        quota_reset_time = datetime.datetime.now() + datetime.timedelta(days=1)
-    
+
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
@@ -63,31 +152,16 @@ def get_authenticated_service():
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
         
+        os.makedirs("data", exist_ok=True)
         with open(TOKEN_FILE, "w") as token:
             token.write(creds.to_json())
     
     return build(API_SERVICE_NAME, API_VERSION, credentials=creds)
 
 # ---------------------------
-# QUOTA MANAGEMENT
-# ---------------------------
-def check_quota(operation: str) -> bool:
-    global current_quota
-    cost = QUOTA_COSTS.get(operation, 50)  # Default to 50 if unknown
-    
-    if current_quota + cost > QUOTA_LIMIT:
-        print(f"❌ Quota exhausted! Used: {current_quota}/{QUOTA_LIMIT}")
-        print(f"🕒 Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        return False
-    
-    current_quota += cost
-    return True
-
-# ---------------------------
 # TAKEOUT PARSER
 # ---------------------------
 def parse_takeout_html(file_path: str) -> Dict[str, List]:
-    """Parse Google Takeout HTML with enhanced validation."""
     activity = {
         "watched": [],
         "liked": [],
@@ -102,22 +176,23 @@ def parse_takeout_html(file_path: str) -> Dict[str, List]:
         return activity
 
     entries = soup.find_all("div", class_="content-cell")
-    print(f"🔍 Found {len(entries)} activities")
 
     # Helper functions
     def _is_video_url(url: str):
         return "watch?v=" in url
+    
     def _is_channel_url(url: str):
         return any(p in url for p in ["/channel/", "/c/", "/user/", "/@"])
+    
     def _is_liked(text: str):
-        # New: Use regex to allow for leading whitespace and match "liked" at the beginning.
         return re.match(r"^\s*liked\b", text, re.IGNORECASE) is not None
+    
     def _is_sub(text: str):
         return any(p in text for p in ["subscribed to", "subscribed channel"])
 
     try:
         for i, div in enumerate(entries, 1):
-            if i % 10 == 0:
+            if i % 100 == 0:
                 print(f"⏳ Parsed {i}/{len(entries)} ({i/len(entries):.0%})")
             
             if link := div.find("a", href=True):
@@ -143,10 +218,9 @@ def parse_takeout_html(file_path: str) -> Dict[str, List]:
 # API OPERATIONS
 # ---------------------------
 def get_own_channel_id(youtube) -> str:
-    """Get authenticated user's channel ID with quota check."""
     if not check_quota('channels.list'):
-        raise Exception("Insufficient quota for initial setup")
-    
+        return ""
+
     try:
         response = youtube.channels().list(
             mine=True,
@@ -154,11 +228,12 @@ def get_own_channel_id(youtube) -> str:
             fields="items/id"
         ).execute()
         return response["items"][0]["id"]
-    except HttpError as e:
-        if "quotaExceeded" in str(e):
-            print("❌ Quota exhausted during initialization")
-            raise
+    except Exception as e:
+        if handle_quota_error(e, "channels.list"):
+            return ""   # gracefully handled
+        print(f"⚠️ Channel fetch failed: {str(e)}")
         return ""
+    
 
 def is_subscribed(youtube, channel_id: str) -> bool:
     """Check subscription status with proper pagination"""
@@ -208,6 +283,7 @@ def get_channel_id(youtube, channel_url: str) -> str:
     
     return None
 
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def subscribe_channel(youtube, channel_url: str) -> bool:
     """Improved subscription flow with better error handling"""
@@ -244,21 +320,47 @@ def subscribe_channel(youtube, channel_url: str) -> bool:
             return True
         print(f"× Subscription error: {str(e)}")
         return False
+    
+def like_video(youtube, url: str, progress: dict) -> bool:
+    """Like a video with quota check and proper error handling."""
+    if not check_quota('videos.rate'):
+        return False
+    
+    try:
+        video_id = url.split("v=")[1]
+        youtube.videos().rate(id=video_id, rating="like").execute()
+        print(f"✓ Liked video: {video_id}")
+        progress["likes"] += 1
+        return True
+
+    except HttpError as e:
+        if "videoRatingDisabled" in str(e):
+            print(f"⚠️ Skipping video (ratings disabled): {url}")
+            progress["links"].append(url)
+            return False
+        else:
+            print(f"x Video Not available {url}")
+            print(f"❌ Error liking video {url}: {str(e)}")
+            return False
+
 
 # ---------------------------
 # MAIN WORKFLOW
 # ---------------------------
 def main():
-    """Main migration workflow with quota controls."""
     youtube = get_authenticated_service()
     progress = json.load(open(PROGRESS_FILE)) if os.path.exists(PROGRESS_FILE) else {
         "subscriptions": 0, 
-        "likes": 0, 
+        "likes": 0,
+        "links": [], 
     }
 
     try:
         # Initial setup
         own_channel_id = get_own_channel_id(youtube)
+        if not own_channel_id:
+           print("\n⏸ Stopping migration due to quota exhaustion.")
+           return   # 🚨 prevent parsing + wasted work
         activity = parse_takeout_html(TAKEOUT_FILE)
         activity["subscribed"] = [url for url in activity["subscribed"] 
                                   if own_channel_id not in url]
@@ -268,39 +370,43 @@ def main():
         print(f"• Likes: {len(activity['liked'])}")
         print(f"• Watched: {len(activity['watched'])}")
 
+        # ---------------------------
         # Subscription migration
+        # ---------------------------
         remaining_subs = len(activity["subscribed"]) - progress["subscriptions"]
         if remaining_subs > 0:
             batch = min(MAX_SUBSCRIPTIONS_PER_RUN, remaining_subs)
-            print(f"\n🚀 Processing {batch} subscriptions (quota: {batch * 50} units)")
+            print(f"\n🚀 Processing {batch} subscriptions (est. {batch * QUOTA_COSTS['subscriptions.insert']} quota units)")
             
             for url in activity["subscribed"][progress["subscriptions"]:progress["subscriptions"]+batch]:
+                if not check_quota("subscriptions.insert"):
+                    print("\n⏸ Quota exhausted during subscriptions. Progress saved.")
+                    break
+
                 if subscribe_channel(youtube, url):
                     progress["subscriptions"] += 1
                     json.dump(progress, open(PROGRESS_FILE, "w"))
                     time.sleep(API_DELAY)
 
-        # Like migration
+        # ---------------------------
+        # Likes migration
+        # ---------------------------
         remaining_likes = len(activity["liked"]) - progress["likes"]
         if remaining_likes > 0:
-            print(f"\n❤️ Processing {remaining_likes} likes (quota: {remaining_likes} units)")
+            print(f"\n❤️ Processing {remaining_likes} likes (est. {remaining_likes * QUOTA_COSTS['videos.rate']} quota units)")
             
             for url in activity["liked"][progress["likes"]:]:
-                if check_quota('videos.rate'):
-                    try:
-                        video_id = url.split("v=")[1]
-                        youtube.videos().rate(id=video_id, rating="like").execute()
-                        print(f"✓ Liked video: {video_id}")  # Confirmation in terminal
-                        progress["likes"] += 1
-                        json.dump(progress, open(PROGRESS_FILE, "w"))
-                        time.sleep(API_DELAY)
-                    except HttpError as e:
-                        if "videoRatingDisabled" in str(e):
-                            print(f"⚠️ Skipping video (ratings disabled): {url}")
-                        else:
-                            print(f"❌ Error liking video {url}: {str(e)}")
+                if not check_quota("videos.rate"):
+                    print("\n⏸ Quota exhausted during likes. Progress saved.")
+                    break
 
-        # Only remove progress file if all migration targets are fully processed
+                like_video(youtube, url, progress)
+                json.dump(progress, open(PROGRESS_FILE, "w"))
+                time.sleep(API_DELAY)
+
+        # ---------------------------
+        # Finalization
+        # ---------------------------
         all_subs_done = progress["subscriptions"] == len(activity["subscribed"])
         all_likes_done = progress["likes"] == len(activity["liked"])
 
@@ -315,8 +421,12 @@ def main():
         print("\n⏸ Migration paused. Run again to resume.")
         json.dump(progress, open(PROGRESS_FILE, "w"))
     except Exception as e:
-        print(f"\n❌ Fatal error: {str(e)}")
+        if handle_quota_error(e, "main"):
+            print("\n⏸ Quota exceeded. Progress saved, please retry after reset.")
+        else:
+            print(f"\n❌ Fatal error: {str(e)}")
         json.dump(progress, open(PROGRESS_FILE, "w"))
+
 
 if __name__ == "__main__":
     main()
