@@ -203,11 +203,14 @@ def parse_takeout_html(file_path: str) -> Dict[str, List]:
     def _is_video_url(url: str):
         return "watch?v=" in url
     
+    
     def _is_channel_url(url: str):
         return any(p in url for p in ["/channel/", "/c/", "/user/", "/@"])
     
+    
     def _is_liked(text: str):
         return re.match(r"^\s*liked\b", text, re.IGNORECASE) is not None
+    
     
     def _is_sub(text: str):
         return any(p in text for p in ["subscribed to", "subscribed channel"])
@@ -253,7 +256,6 @@ def get_own_channel_id(youtube) -> str:
         print(f"⚠️ Channel fetch failed: {str(e)}")
         return ""
     
-
 def is_subscribed(youtube, channel_id: str) -> bool:
     """Check subscription status with proper pagination"""
     try:
@@ -301,6 +303,7 @@ def get_channel_id(youtube, channel_url: str) -> str:
             print(f"⚠️ Channel lookup failed for {username}: {str(e)}")
     
     return None
+
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -409,7 +412,7 @@ def main():
     progress = json.load(open(PROGRESS_FILE)) if os.path.exists(PROGRESS_FILE) else {
         "subscriptions": 0, 
         "likes": 0,
-        "links": [], 
+        "links": [],
     }
 
     try:
@@ -428,9 +431,11 @@ def main():
         print(f"• Likes: {len(activity['liked'])}")
         print(f"• Watched: {len(activity['watched'])}")
 
+    
         # ---------------------------
         # Subscription migration
         # ---------------------------
+
         remaining_subs = len(activity["subscribed"]) - progress["subscriptions"]
         if remaining_subs > 0:
             batch = min(MAX_SUBSCRIPTIONS_PER_RUN, remaining_subs)
@@ -454,6 +459,13 @@ def main():
             print(f"\nProcessing {remaining_likes} likes (est. {remaining_likes * QUOTA_COSTS['videos.rate']} quota units)")
             
             for url in activity["liked"][progress["likes"]:]:
+                if not check_quota("videos.rate"):
+                    print("\n⏸ Quota exhausted during likes. Progress saved.")
+                    break
+
+                like_video(youtube, url, progress)
+                json.dump(progress, open(PROGRESS_FILE, "w"))
+                time.sleep(API_DELAY)
                 if not check_quota("videos.rate"):
                     print("\n⏸ Quota exhausted during likes. Progress saved.")
                     break
@@ -486,6 +498,7 @@ def main():
         else:
             print(f"\n❌ Fatal error: {str(e)}")
         json.dump(progress, open(PROGRESS_FILE, "w"))
+
 
 
 if __name__ == "__main__":
