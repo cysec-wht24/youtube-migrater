@@ -13,3 +13,5 @@ A Python tool to automate the migration of liked videos and subscribed channels 
 - **Resumable Operations**: Tracks progress in `progress.json` so you can pause and resume without losing your place.  
 
 ---
+
+### Steps

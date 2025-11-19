@@ -4,6 +4,7 @@ import time
 import json
 import datetime
 import requests
+from tqdm import tqdm
 from bs4 import BeautifulSoup
 from typing import Dict, List
 from googleapiclient.discovery import build
@@ -20,6 +21,7 @@ TOKEN_FILE = os.path.join("data", "token.json")
 CREDENTIALS_FILE = "data/client_secret_8393986395-j3meqchdibd4eiijln71944irmlnadn2.apps.googleusercontent.com.json"
 TAKEOUT_FILE = "data/MyActivity.html"
 PROGRESS_FILE = os.path.join("data", "progress.json")
+PARSED_FILE = os.path.join("data", "parsed_activity.json")
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
@@ -59,34 +61,54 @@ if __name__ == "__main__":
 
 
 def fetch_quota_costs() -> Dict[str, int]:
-    """
-    Scrape Google's official YouTube Data API quota cost table.
-    Returns a dict mapping method -> quota cost.
-    """
     url = "https://developers.google.com/youtube/v3/determine_quota_cost"
+    headers = {"User-Agent": "ytmig/1.0"}
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=10, headers=headers)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        costs = {}
-        for row in soup.select("table tr"):
-            cells = [td.get_text(strip=True) for td in row.find_all("td")]
-            if len(cells) == 2 and cells[1].isdigit():
-                method, cost = cells
-                costs[method] = int(cost)
+
+        if not soup.find("table"):
+            print("⚠️ Quota table not found in the documentation page.")
+        
+        costs: Dict[str, int] = {}
+        current_resource = None
+
+        for row in soup.find("table").select("tbody tr"):
+            tds = row.find_all("td")
+
+            # resource cell may contain <h3 id="resourceName"> or be blank (&nbsp;)
+            res_td = tds[0]
+            h3 = res_td.find("h3")
+            if h3:
+                # id attribute (gives canonical resource like "channels" or "playlistItems")
+                if h3.has_attr("id") and h3["id"].strip():
+                    current_resource = h3["id"].strip()
+                else:
+                    current_resource = re.sub(r"\s+", "", h3.get_text(strip=True))
+
+            method = tds[1].get_text(strip=True)
+            cost_text = tds[2].get_text(strip=True)
+            m = re.search(r"(\d+)", cost_text)
+            if current_resource and m:
+                key = f"{current_resource}.{method}"
+                costs[key] = int(m.group(1))
+            # print("Costs so far:", costs)
+
         if costs:
-            print("✅ Quota costs fetched dynamically from Google Docs.")
+            print("Quota costs fetched dynamically from Google Docs.")
             return costs
+
     except Exception as e:
-        print(f"⚠️ Could not fetch quota costs, falling back to defaults: {e}")
+        print(f"Could not fetch quota costs, falling back to defaults: {e}")
 
     # fallback hardcoded values
     return {
-        'channels.list': 1,
-        'subscriptions.insert': 50,
-        'videos.rate': 50,
-        'playlists.insert': 50,
-        'playlistItems.insert': 50
+        "channels.list": 1,
+        "subscriptions.insert": 50,
+        "videos.rate": 50,
+        "playlists.insert": 50,
+        "playlistItems.insert": 50,
     }
 
 # Dynamically load quota costs
@@ -98,7 +120,7 @@ QUOTA_COSTS = fetch_quota_costs()
 current_quota = 0
 
 # Reset happens daily at midnight (local system time).
-# You can align with Google's Pacific Time reset if needed.
+# Align with Google's Pacific Time reset
 def get_next_reset():
     now = datetime.datetime.now()
     tomorrow = now + datetime.timedelta(days=1)
@@ -191,10 +213,7 @@ def parse_takeout_html(file_path: str) -> Dict[str, List]:
         return any(p in text for p in ["subscribed to", "subscribed channel"])
 
     try:
-        for i, div in enumerate(entries, 1):
-            if i % 100 == 0:
-                print(f"⏳ Parsed {i}/{len(entries)} ({i/len(entries):.0%})")
-            
+        for div in tqdm(entries, desc="Parsing Takeout", unit=" entry"):  
             if link := div.find("a", href=True):
                 url = link["href"].split('&')[0]
                 text = div.get_text(separator=" ", strip=True).lower()
@@ -207,11 +226,11 @@ def parse_takeout_html(file_path: str) -> Dict[str, List]:
                     else:
                         activity["watched"].append(url)
                     
-        print("✅ Parsing completed")
+        print("Parsing completed")
         return activity
     
     except Exception as e:
-        print(f"❌ Parse error: {str(e)}")
+        print(f"Parse error: {str(e)}")
         return activity
 
 # ---------------------------
@@ -316,7 +335,7 @@ def subscribe_channel(youtube, channel_url: str) -> bool:
         
     except HttpError as e:
         if "subscriptionDuplicate" in str(e):
-            print(f"⏭️ Already subscribed (API validation): {channel_id}")
+            print(f"Already subscribed (API validation): {channel_id}")
             return True
         print(f"× Subscription error: {str(e)}")
         return False
@@ -335,13 +354,51 @@ def like_video(youtube, url: str, progress: dict) -> bool:
 
     except HttpError as e:
         if "videoRatingDisabled" in str(e):
-            print(f"⚠️ Skipping video (ratings disabled): {url}")
+            print(f"Skipping video (ratings disabled): {url}")
             progress["links"].append(url)
             return False
         else:
             print(f"x Video Not available {url}")
-            print(f"❌ Error liking video {url}: {str(e)}")
+            print(f"Error liking video {url}: {str(e)}")
             return False
+        
+def load_or_parse_takeout(parsed_file: str, takeout_file: str) -> Dict[str, List]:
+    """
+    Loads parsed JSON if present & asks user if they want to re-parse.
+    Otherwise parses the Takeout HTML.
+    """
+
+    # Case 1: parsed file exists
+    if os.path.exists(parsed_file):
+        try:
+            existing = json.load(open(parsed_file, "r"))
+            if any(existing.values()):   # file has non-empty data
+                print("\nParsed file already exists.")
+                choice = input("Re-parse Takeout HTML? (Y/N): ").strip().lower()
+
+                if choice == "y":
+                    print("\nRe-parsing Takeout...")
+                    data = parse_takeout_html(takeout_file)
+
+                    # overwrite old file no matter what
+                    json.dump(data, open(parsed_file, "w"), indent=2)
+                    return data
+
+                else:
+                    print("Using existing parsed file.")
+                    return existing
+
+        except Exception:
+            print("Error reading existing parsed file. Re-parsing...")
+            data = parse_takeout_html(takeout_file)
+            json.dump(data, open(parsed_file, "w"), indent=2)
+            return data
+
+    # Case 2: parsed file does NOT exist
+    print("No parsed file found. Creating new parsed file...")
+    data = parse_takeout_html(takeout_file)
+    json.dump(data, open(parsed_file, "w"), indent=2)
+    return data
 
 
 # ---------------------------
@@ -360,12 +417,13 @@ def main():
         own_channel_id = get_own_channel_id(youtube)
         if not own_channel_id:
            print("\n⏸ Stopping migration due to quota exhaustion.")
-           return   # 🚨 prevent parsing + wasted work
-        activity = parse_takeout_html(TAKEOUT_FILE)
+           return   # prevent parsing + wasted work
+        
+        activity = load_or_parse_takeout(PARSED_FILE, TAKEOUT_FILE)
         activity["subscribed"] = [url for url in activity["subscribed"] 
                                   if own_channel_id not in url]
 
-        print(f"\n📊 Migration Targets:")
+        print(f"\nMigration Targets:")
         print(f"• Subscriptions: {len(activity['subscribed'])}")
         print(f"• Likes: {len(activity['liked'])}")
         print(f"• Watched: {len(activity['watched'])}")
@@ -376,7 +434,7 @@ def main():
         remaining_subs = len(activity["subscribed"]) - progress["subscriptions"]
         if remaining_subs > 0:
             batch = min(MAX_SUBSCRIPTIONS_PER_RUN, remaining_subs)
-            print(f"\n🚀 Processing {batch} subscriptions (est. {batch * QUOTA_COSTS['subscriptions.insert']} quota units)")
+            print(f"\nProcessing {batch} subscriptions (est. {batch * QUOTA_COSTS['subscriptions.insert']} quota units)")
             
             for url in activity["subscribed"][progress["subscriptions"]:progress["subscriptions"]+batch]:
                 if not check_quota("subscriptions.insert"):
@@ -393,7 +451,7 @@ def main():
         # ---------------------------
         remaining_likes = len(activity["liked"]) - progress["likes"]
         if remaining_likes > 0:
-            print(f"\n❤️ Processing {remaining_likes} likes (est. {remaining_likes * QUOTA_COSTS['videos.rate']} quota units)")
+            print(f"\nProcessing {remaining_likes} likes (est. {remaining_likes * QUOTA_COSTS['videos.rate']} quota units)")
             
             for url in activity["liked"][progress["likes"]:]:
                 if not check_quota("videos.rate"):
@@ -413,6 +471,8 @@ def main():
         if all_subs_done and all_likes_done:
             if os.path.exists(PROGRESS_FILE):
                 os.remove(PROGRESS_FILE)
+            if os.path.exists(PARSED_FILE):
+                os.remove(PARSED_FILE)
             print("\n🎉 Migration completed! All progress has been finalized.")
         else:
             print("\n⏸ Migration incomplete. Progress has been saved for the next run.")

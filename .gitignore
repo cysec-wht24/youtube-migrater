@@ -21,6 +21,7 @@ dist/
 token.json
 client_secret_*.json
 progress.json
+parsed_takeout.json
 
 # macOS system files
 .DS_Store

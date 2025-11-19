@@ -1,3 +1,5 @@
 {
-    "ros.distro": "jazzy"
+    "ros.distro": "jazzy",
+    "python-envs.pythonProjects": [],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }
