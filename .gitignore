@@ -19,7 +19,7 @@ dist/
 
 # Token and credential files
 token.json
-client_secret_*.json
+client_secret*.json
 progress.json
 parsed_takeout.json
 
