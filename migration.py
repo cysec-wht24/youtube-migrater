@@ -203,14 +203,11 @@ def parse_takeout_html(file_path: str) -> Dict[str, List]:
     def _is_video_url(url: str):
         return "watch?v=" in url
     
-    
     def _is_channel_url(url: str):
         return any(p in url for p in ["/channel/", "/c/", "/user/", "/@"])
     
-    
     def _is_liked(text: str):
         return re.match(r"^\s*liked\b", text, re.IGNORECASE) is not None
-    
     
     def _is_sub(text: str):
         return any(p in text for p in ["subscribed to", "subscribed channel"])
@@ -282,33 +279,31 @@ def is_subscribed(youtube, channel_id: str) -> bool:
         return False
     
 def get_channel_id(youtube, channel_url: str) -> str:
-    """Robust channel ID resolution with URL parsing"""
-    # Handle direct channel IDs
+
+    # Check for numeric channel ID first
     if match := re.search(r"youtube\.com/channel/([\w-]+)", channel_url):
         return match.group(1)
-    
-    # Handle custom URLs
-    if match := re.search(r"youtube\.com/(?:c/|user/|@)([\w-]+)", channel_url):
-        username = match.group(1)
+
+    # Optional: check for @handle (requires API lookup)
+    if match := re.search(r"youtube\.com/@([\w-]+)", channel_url):
+        handle = match.group(1)
         try:
             result = youtube.search().list(
-                q=username,
+                q=handle,
                 type="channel",
-                part="snippet",
-                maxResults=1,
-                fields="items/snippet/channelId"
+                part="id",
+                maxResults=1
             ).execute()
-            return result["items"][0]["snippet"]["channelId"]
+            return result["items"][0]["id"]["channelId"]
         except Exception as e:
-            print(f"⚠️ Channel lookup failed for {username}: {str(e)}")
+            print(f"⚠️ Channel lookup failed for {handle}: {e}")
     
+    print(f"⚠️ Unknown channel URL format: {channel_url}")
     return None
-
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def subscribe_channel(youtube, channel_url: str) -> bool:
-    """Improved subscription flow with better error handling"""
     try:
         channel_id = get_channel_id(youtube, channel_url)
         if not channel_id:
@@ -344,7 +339,6 @@ def subscribe_channel(youtube, channel_url: str) -> bool:
         return False
     
 def like_video(youtube, url: str, progress: dict) -> bool:
-    """Like a video with quota check and proper error handling."""
     if not check_quota('videos.rate'):
         return False
     
@@ -366,10 +360,6 @@ def like_video(youtube, url: str, progress: dict) -> bool:
             return False
         
 def load_or_parse_takeout(parsed_file: str, takeout_file: str) -> Dict[str, List]:
-    """
-    Loads parsed JSON if present & asks user if they want to re-parse.
-    Otherwise parses the Takeout HTML.
-    """
 
     # Case 1: parsed file exists
     if os.path.exists(parsed_file):
@@ -459,13 +449,6 @@ def main():
             print(f"\nProcessing {remaining_likes} likes (est. {remaining_likes * QUOTA_COSTS['videos.rate']} quota units)")
             
             for url in activity["liked"][progress["likes"]:]:
-                if not check_quota("videos.rate"):
-                    print("\n⏸ Quota exhausted during likes. Progress saved.")
-                    break
-
-                like_video(youtube, url, progress)
-                json.dump(progress, open(PROGRESS_FILE, "w"))
-                time.sleep(API_DELAY)
                 if not check_quota("videos.rate"):
                     print("\n⏸ Quota exhausted during likes. Progress saved.")
                     break
