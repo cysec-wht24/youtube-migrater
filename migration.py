@@ -232,6 +232,40 @@ def parse_takeout_html(file_path: str) -> Dict[str, List]:
         print(f"Parse error: {str(e)}")
         return activity
 
+def load_or_parse_takeout(parsed_file: str, takeout_file: str) -> Dict[str, List]:
+
+    # Case 1: parsed file exists
+    if os.path.exists(parsed_file):
+        try:
+            existing = json.load(open(parsed_file, "r"))
+            if any(existing.values()):   # file has non-empty data
+                print("\nParsed file already exists.")
+                choice = input("Re-parse Takeout HTML? (Y/N): ").strip().lower()
+
+                if choice == "y":
+                    print("\nRe-parsing Takeout...")
+                    data = parse_takeout_html(takeout_file)
+
+                    # overwrite old file no matter what
+                    json.dump(data, open(parsed_file, "w"), indent=2)
+                    return data
+
+                else:
+                    print("Using existing parsed file.")
+                    return existing
+
+        except Exception:
+            print("Error reading existing parsed file. Re-parsing...")
+            data = parse_takeout_html(takeout_file)
+            json.dump(data, open(parsed_file, "w"), indent=2)
+            return data
+
+    # Case 2: parsed file does NOT exist
+    print("No parsed file found. Creating new parsed file...")
+    data = parse_takeout_html(takeout_file)
+    json.dump(data, open(parsed_file, "w"), indent=2)
+    return data
+
 # ---------------------------
 # API OPERATIONS
 # ---------------------------
@@ -283,7 +317,7 @@ def get_channel_id(youtube, channel_url: str) -> str:
     if match := re.search(r"youtube\.com/channel/([\w-]+)", channel_url):
         return match.group(1)
 
-    # Optional: check for @handle (requires API lookup)
+    # Optional: check for @handle (requires API lookup) Not used
     if match := re.search(r"youtube\.com/@([\w-]+)", channel_url):
         handle = match.group(1)
         try:
@@ -358,39 +392,6 @@ def like_video(youtube, url: str, progress: dict) -> bool:
             print(f"Error liking video {url}: {str(e)}")
             return False
         
-def load_or_parse_takeout(parsed_file: str, takeout_file: str) -> Dict[str, List]:
-
-    # Case 1: parsed file exists
-    if os.path.exists(parsed_file):
-        try:
-            existing = json.load(open(parsed_file, "r"))
-            if any(existing.values()):   # file has non-empty data
-                print("\nParsed file already exists.")
-                choice = input("Re-parse Takeout HTML? (Y/N): ").strip().lower()
-
-                if choice == "y":
-                    print("\nRe-parsing Takeout...")
-                    data = parse_takeout_html(takeout_file)
-
-                    # overwrite old file no matter what
-                    json.dump(data, open(parsed_file, "w"), indent=2)
-                    return data
-
-                else:
-                    print("Using existing parsed file.")
-                    return existing
-
-        except Exception:
-            print("Error reading existing parsed file. Re-parsing...")
-            data = parse_takeout_html(takeout_file)
-            json.dump(data, open(parsed_file, "w"), indent=2)
-            return data
-
-    # Case 2: parsed file does NOT exist
-    print("No parsed file found. Creating new parsed file...")
-    data = parse_takeout_html(takeout_file)
-    json.dump(data, open(parsed_file, "w"), indent=2)
-    return data
 
 # ---------------------------
 # MAIN WORKFLOW
@@ -411,9 +412,7 @@ def main():
            return   # prevent parsing + wasted work
         
         activity = load_or_parse_takeout(PARSED_FILE, TAKEOUT_FILE)
-        activity["subscribed"] = [url for url in activity["subscribed"] 
-                                  if own_channel_id not in url]
-
+        activity["subscribed"] = [url for url in activity["subscribed"] if own_channel_id not in url]
         print(f"\nMigration Targets:")
         print(f"• Subscriptions: {len(activity['subscribed'])}")
         print(f"• Likes: {len(activity['liked'])}")
