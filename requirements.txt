@@ -6,3 +6,5 @@ lxml
 tenacity
 requests
 tqdm
+pytz
+tzlocal

@@ -18,7 +18,7 @@ from googleapiclient.errors import HttpError
 # CONFIGURATION
 # ---------------------------
 TOKEN_FILE = os.path.join("data", "token.json")
-CREDENTIALS_FILE = "data/client_secret_8393986395-j3meqchdibd4eiijln71944irmlnadn2.apps.googleusercontent.com.json"
+CREDENTIALS_FILE = "data/client_secret.json"
 TAKEOUT_FILE = "data/MyActivity.html"
 PROGRESS_FILE = os.path.join("data", "progress.json")
 PARSED_FILE = os.path.join("data", "parsed_activity.json")
@@ -27,7 +27,7 @@ API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 API_DELAY = 5  # Seconds between API calls
-MAX_SUBSCRIPTIONS_PER_RUN = 50  # Conservative default
+MAX_SUBSCRIPTIONS_PER_RUN = 100  # Conservative default
 QUOTA_LIMIT = 10000  # Daily quota limit (default, may vary per project)
 
 
@@ -40,7 +40,7 @@ def banner():
     WHITE = "\033[37m"
     RESET = "\033[0m"
 
-    __version__ = "1.0.0"  # Replace with your actual version
+    __version__ = "1.0.0"  
 
     print(rf"""{ORANGE}
 {ORANGE}  __     ___   __  __ _                 _  
@@ -55,7 +55,6 @@ def banner():
 {GREEN}[{WHITE}-{GREEN}]{CYAN} Tool Created by Manomay Bisht {WHITE}{RESET}
     """)
 
-# Example usage
 if __name__ == "__main__":
     banner()
 
@@ -69,7 +68,7 @@ def fetch_quota_costs() -> Dict[str, int]:
         soup = BeautifulSoup(r.text, "html.parser")
 
         if not soup.find("table"):
-            print("⚠️ Quota table not found in the documentation page.")
+            print("Quota table not found in the documentation page.")
         
         costs: Dict[str, int] = {}
         current_resource = None
@@ -135,8 +134,8 @@ quota_reset_time = get_next_reset()
 def handle_quota_error(e: Exception, operation: str) -> bool:
     """Centralized quota error handler"""
     if isinstance(e, HttpError) and "quotaExceeded" in str(e):
-        print(f"❌ Quota exhausted while performing '{operation}'")
-        print(f"🕒 Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Quota exhausted while performing '{operation}'")
+        print(f"Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
         return True  # indicates quota exceeded
     return False
 
@@ -150,8 +149,8 @@ def check_quota(operation: str) -> bool:
         quota_reset_time = get_next_reset()  # cleaner, reuse your helper
 
     if current_quota + cost > QUOTA_LIMIT:
-        print(f"❌ Local quota exhausted! Used {current_quota}/{QUOTA_LIMIT}")
-        print(f"🕒 Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Local quota exhausted! Used {current_quota}/{QUOTA_LIMIT}")
+        print(f"Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
         return False
 
     current_quota += cost
@@ -194,7 +193,7 @@ def parse_takeout_html(file_path: str) -> Dict[str, List]:
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             soup = BeautifulSoup(f, "lxml")
     except Exception as e:
-        print(f"❌ File error: {str(e)}")
+        print(f"File error: {str(e)}")
         return activity
 
     entries = soup.find_all("div", class_="content-cell")
@@ -250,7 +249,7 @@ def get_own_channel_id(youtube) -> str:
     except Exception as e:
         if handle_quota_error(e, "channels.list"):
             return ""   # gracefully handled
-        print(f"⚠️ Channel fetch failed: {str(e)}")
+        print(f"Channel fetch failed: {str(e)}")
         return ""
     
 def is_subscribed(youtube, channel_id: str) -> bool:
@@ -275,7 +274,7 @@ def is_subscribed(youtube, channel_id: str) -> bool:
                 return False
 
     except HttpError as e:
-        print(f"⚠️ Subscription check failed: {str(e)}")
+        print(f"Subscription check failed: {str(e)}")
         return False
     
 def get_channel_id(youtube, channel_url: str) -> str:
@@ -296,9 +295,9 @@ def get_channel_id(youtube, channel_url: str) -> str:
             ).execute()
             return result["items"][0]["id"]["channelId"]
         except Exception as e:
-            print(f"⚠️ Channel lookup failed for {handle}: {e}")
+            print(f"Channel lookup failed for {handle}: {e}")
     
-    print(f"⚠️ Unknown channel URL format: {channel_url}")
+    print(f"Unknown channel URL format: {channel_url}")
     return None
 
 
@@ -311,7 +310,7 @@ def subscribe_channel(youtube, channel_url: str) -> bool:
             return False
 
         if is_subscribed(youtube, channel_id):
-            print(f"⏭️ Already subscribed: {channel_id}")
+            print(f"⏭ Already subscribed: {channel_id}")
             return True
 
         if not check_quota('subscriptions.insert'):
@@ -393,7 +392,6 @@ def load_or_parse_takeout(parsed_file: str, takeout_file: str) -> Dict[str, List
     json.dump(data, open(parsed_file, "w"), indent=2)
     return data
 
-
 # ---------------------------
 # MAIN WORKFLOW
 # ---------------------------
@@ -425,7 +423,6 @@ def main():
         # ---------------------------
         # Subscription migration
         # ---------------------------
-
         remaining_subs = len(activity["subscribed"]) - progress["subscriptions"]
         if remaining_subs > 0:
             batch = min(MAX_SUBSCRIPTIONS_PER_RUN, remaining_subs)
@@ -468,7 +465,7 @@ def main():
                 os.remove(PROGRESS_FILE)
             if os.path.exists(PARSED_FILE):
                 os.remove(PARSED_FILE)
-            print("\n🎉 Migration completed! All progress has been finalized.")
+            print("\n Migration completed! All progress has been finalized.")
         else:
             print("\n⏸ Migration incomplete. Progress has been saved for the next run.")
 
@@ -479,10 +476,8 @@ def main():
         if handle_quota_error(e, "main"):
             print("\n⏸ Quota exceeded. Progress saved, please retry after reset.")
         else:
-            print(f"\n❌ Fatal error: {str(e)}")
+            print(f"\nFatal error: {str(e)}")
         json.dump(progress, open(PROGRESS_FILE, "w"))
-
-
 
 if __name__ == "__main__":
     main()
