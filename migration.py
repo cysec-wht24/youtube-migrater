@@ -4,6 +4,8 @@ import time
 import json
 import datetime
 import requests
+import pytz
+from tzlocal import get_localzone
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 from typing import Dict, List
@@ -22,6 +24,7 @@ CREDENTIALS_FILE = "data/client_secret.json"
 TAKEOUT_FILE = "data/MyActivity.html"
 PROGRESS_FILE = os.path.join("data", "progress.json")
 PARSED_FILE = os.path.join("data", "parsed_activity.json")
+
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
@@ -117,15 +120,42 @@ QUOTA_COSTS = fetch_quota_costs()
 # GLOBAL STATE
 # ---------------------------
 current_quota = 0
+reset_time, time_left = get_next_reset()
+quota_reset_time = reset_time
+quota_time_left = time_left
 
-# Reset happens daily at midnight (local system time).
 # Align with Google's Pacific Time reset
 def get_next_reset():
-    now = datetime.datetime.now()
-    tomorrow = now + datetime.timedelta(days=1)
-    return datetime.datetime.combine(tomorrow.date(), datetime.time.min)
 
-quota_reset_time = get_next_reset()
+    pacific = pytz.timezone("America/Los_Angeles")
+    user_tz = get_localzone()  # auto-detect system timezone
+
+    # Current times
+    now_pt = datetime.datetime.now(pacific)
+    now_user = datetime.datetime.now(user_tz)
+
+    # Next midnight in Pacific Time
+    reset_pt = (now_pt + datetime.timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    # Convert to user's timezone
+    reset_user = reset_pt.astimezone(user_tz)
+
+    # Safety: ensure it's a future time
+    while reset_user <= now_user:
+        reset_pt += datetime.timedelta(days=1)
+        reset_user = reset_pt.astimezone(user_tz)
+
+    time_left = reset_user - now_user
+    return reset_user, time_left
+
+def format_time_left(td):
+    total_seconds = int(max(td.total_seconds(), 0))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 # ---------------------------
@@ -135,23 +165,36 @@ def handle_quota_error(e: Exception, operation: str) -> bool:
     """Centralized quota error handler"""
     if isinstance(e, HttpError) and "quotaExceeded" in str(e):
         print(f"Quota exhausted while performing '{operation}'")
-        print(f"Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        return True  # indicates quota exceeded
+        print(f"Quota resets in {format_time_left(quota_time_left)} "
+              f"at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        return True
     return False
 
+
 def check_quota(operation: str) -> bool:
-    global current_quota, quota_reset_time
+    global current_quota, quota_reset_time, quota_time_left
     cost = QUOTA_COSTS.get(operation, 50)
+    now = datetime.datetime.now()
 
-    # Reset if needed
-    if datetime.datetime.now() > quota_reset_time:
-        current_quota = 0
-        quota_reset_time = get_next_reset()  # cleaner, reuse your helper
-
+    # Prevent exceeding local quota
     if current_quota + cost > QUOTA_LIMIT:
         print(f"Local quota exhausted! Used {current_quota}/{QUOTA_LIMIT}")
-        print(f"Quota resets at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Quota resets in {format_time_left(quota_time_left)} "
+              f"at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
         return False
+
+    # reset logic
+    if now > quota_reset_time:
+        current_quota = 0
+        reset_time, time_left = get_next_reset()
+        quota_reset_time = reset_time
+        quota_time_left = time_left
+    else:
+        # recalc remaining time dynamically
+        quota_time_left = quota_reset_time - now
+
+    print(f"[Quota] Used: {current_quota}/{QUOTA_LIMIT} | "
+          f"Time left: {format_time_left(quota_time_left)}")
 
     current_quota += cost
     return True
