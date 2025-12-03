@@ -24,7 +24,7 @@ CREDENTIALS_FILE = "data/client_secret.json"
 TAKEOUT_FILE = "data/MyActivity.html"
 PROGRESS_FILE = os.path.join("data", "progress.json")
 PARSED_FILE = os.path.join("data", "parsed_activity.json")
-
+INFO_FILE = os.path.join("data", "api_derived.json")
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
@@ -32,7 +32,6 @@ SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 API_DELAY = 5  # Seconds between API calls
 MAX_SUBSCRIPTIONS_PER_RUN = 100  # Conservative default
 QUOTA_LIMIT = 10000  # Daily quota limit (default, may vary per project)
-
 
 def banner():
     # Define color codes
@@ -60,6 +59,43 @@ def banner():
 
 if __name__ == "__main__":
     banner()
+
+
+# ---------------------------
+# HELPER FUNCTIONS
+# ---------------------------
+# Align with Google's Pacific Time reset
+def get_next_reset():
+
+    pacific = pytz.timezone("America/Los_Angeles")
+    user_tz = get_localzone()  # auto-detect system timezone
+
+    # Current times
+    now_pt = datetime.datetime.now(pacific)
+    now_user = datetime.datetime.now(user_tz)
+
+    # Next midnight in Pacific Time
+    reset_pt = (now_pt + datetime.timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    # Convert to user's timezone
+    reset_user = reset_pt.astimezone(user_tz)
+
+    # Safety: ensure it's a future time
+    while reset_user <= now_user:
+        reset_pt += datetime.timedelta(days=1)
+        reset_user = reset_pt.astimezone(user_tz)
+
+    time_left = reset_user - now_user
+    return reset_user, time_left
+
+def format_time_left(td):
+    total_seconds = int(max(td.total_seconds(), 0))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def fetch_quota_costs() -> Dict[str, int]:
@@ -113,50 +149,14 @@ def fetch_quota_costs() -> Dict[str, int]:
         "playlistItems.insert": 50,
     }
 
-# Dynamically load quota costs
-QUOTA_COSTS = fetch_quota_costs()
-
 # ---------------------------
 # GLOBAL STATE
 # ---------------------------
+QUOTA_COSTS = fetch_quota_costs() # Dynamically load quota costs
 current_quota = 0
 reset_time, time_left = get_next_reset()
 quota_reset_time = reset_time
 quota_time_left = time_left
-
-# Align with Google's Pacific Time reset
-def get_next_reset():
-
-    pacific = pytz.timezone("America/Los_Angeles")
-    user_tz = get_localzone()  # auto-detect system timezone
-
-    # Current times
-    now_pt = datetime.datetime.now(pacific)
-    now_user = datetime.datetime.now(user_tz)
-
-    # Next midnight in Pacific Time
-    reset_pt = (now_pt + datetime.timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-
-    # Convert to user's timezone
-    reset_user = reset_pt.astimezone(user_tz)
-
-    # Safety: ensure it's a future time
-    while reset_user <= now_user:
-        reset_pt += datetime.timedelta(days=1)
-        reset_user = reset_pt.astimezone(user_tz)
-
-    time_left = reset_user - now_user
-    return reset_user, time_left
-
-def format_time_left(td):
-    total_seconds = int(max(td.total_seconds(), 0))
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    seconds = total_seconds % 60
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
 
 # ---------------------------
 # QUOTA MANAGEMENT
@@ -174,7 +174,7 @@ def handle_quota_error(e: Exception, operation: str) -> bool:
 def check_quota(operation: str) -> bool:
     global current_quota, quota_reset_time, quota_time_left
     cost = QUOTA_COSTS.get(operation, 50)
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(get_localzone())
 
     # Prevent exceeding local quota
     if current_quota + cost > QUOTA_LIMIT:
@@ -312,7 +312,7 @@ def load_or_parse_takeout(parsed_file: str, takeout_file: str) -> Dict[str, List
 # ---------------------------
 # API OPERATIONS
 # ---------------------------
-def get_own_channel_id(youtube) -> str:
+def get_own_channel_id(youtube, info_file) -> str:
     if not check_quota('channels.list'):
         return ""
 
@@ -441,6 +441,7 @@ def like_video(youtube, url: str, progress: dict) -> bool:
 # ---------------------------
 def main():
     youtube = get_authenticated_service()
+    # print("youtube is ready")
     progress = json.load(open(PROGRESS_FILE)) if os.path.exists(PROGRESS_FILE) else {
         "subscriptions": 0, 
         "likes": 0,
@@ -450,6 +451,7 @@ def main():
     try:
         # Initial setup
         own_channel_id = get_own_channel_id(youtube)
+        # print(own_channel_id)
         if not own_channel_id:
            print("\n⏸ Stopping migration due to quota exhaustion.")
            return   # prevent parsing + wasted work
