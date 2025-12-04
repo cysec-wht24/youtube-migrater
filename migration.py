@@ -9,6 +9,7 @@ from tzlocal import get_localzone
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 from typing import Dict, List
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -209,10 +210,16 @@ def get_authenticated_service():
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
     
+    # If credentials are missing or invalid, handle refresh or re-authentication
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+        try:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+                creds = flow.run_local_server(port=0)
+        except RefreshError:
+            print("Token expired or revoked. Re-authenticating...")
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
         
@@ -312,7 +319,7 @@ def load_or_parse_takeout(parsed_file: str, takeout_file: str) -> Dict[str, List
 # ---------------------------
 # API OPERATIONS
 # ---------------------------
-def get_own_channel_id(youtube, info_file) -> str:
+def get_own_channel_id(youtube) -> str:
     if not check_quota('channels.list'):
         return ""
 
@@ -328,7 +335,52 @@ def get_own_channel_id(youtube, info_file) -> str:
             return ""   # gracefully handled
         print(f"Channel fetch failed: {str(e)}")
         return ""
-    
+
+def load_own_channel_id(info_file: str, youtube) -> str:
+
+    data = {}
+
+    # CASE 1: File exists → load it
+    if os.path.exists(info_file):
+        try:
+            with open(info_file, "r") as f:
+                data = json.load(f)
+
+        except (json.JSONDecodeError, OSError):
+            print("Error reading info file. Recalling API...")
+            channel_id = get_own_channel_id(youtube).strip()
+            data["channel_id"] = channel_id
+            with open(info_file, "w") as f:
+                json.dump(data, f, indent=4)
+
+            return channel_id
+
+        channel_id = data.get("channel_id", "")
+
+        if channel_id:
+            print(f"Channel_id already exists: {channel_id}")
+            choice = input("Recall API to get channel id? (Y/n): ").strip().lower()
+            match choice:
+                case "n":
+                    print("Using saved channel ID")
+                    return channel_id
+                case _:
+                    print("Recalling API for new channel ID...")
+                    channel_id = get_own_channel_id(youtube).strip()
+        else:
+            print("No channel_id in file. Fetching from API...")
+            channel_id = get_own_channel_id(youtube).strip()
+    # CASE 2: File does NOT exist
+    else:
+        print("Info file not found. Fetching from API...")
+        channel_id = get_own_channel_id(youtube).strip()
+
+    # Save / Update the file safely
+    data["channel_id"] = channel_id
+    with open(info_file, "w") as f:
+        json.dump(data, f, indent=4)
+    return channel_id
+
 def is_subscribed(youtube, channel_id: str) -> bool:
     """Check subscription status with proper pagination"""
     try:
@@ -450,7 +502,7 @@ def main():
 
     try:
         # Initial setup
-        own_channel_id = get_own_channel_id(youtube)
+        own_channel_id = load_own_channel_id(INFO_FILE, youtube)
         # print(own_channel_id)
         if not own_channel_id:
            print("\n⏸ Stopping migration due to quota exhaustion.")
