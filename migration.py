@@ -381,10 +381,11 @@ def load_own_channel_id(info_file: str, youtube) -> str:
         json.dump(data, f, indent=4)
     return channel_id
 
-def is_subscribed(youtube, channel_id: str) -> bool:
-    """Check subscription status with proper pagination"""
+def get_subscribed_channel_list(youtube):
+    print("Fetching subscriptions from API...")
+    subscribed_channel_list = []
+    next_page = None
     try:
-        next_page = None
         while True:
             response = youtube.subscriptions().list(
                 part="snippet",
@@ -393,19 +394,57 @@ def is_subscribed(youtube, channel_id: str) -> bool:
                 pageToken=next_page,
                 fields="items/snippet/resourceId/channelId,nextPageToken"
             ).execute()
-            
-            if any(sub["snippet"]["resourceId"]["channelId"] == channel_id 
-                   for sub in response.get("items", [])):
-                return True
-            
+
+            for sub in response.get("items", []):
+                channel_id = sub["snippet"]["resourceId"]["channelId"]
+                subscribed_channel_list.append(channel_id)
+
             next_page = response.get("nextPageToken")
             if not next_page:
-                return False
+                break
+
+        # Ensure data folder exists
+        os.makedirs(os.path.dirname(INFO_FILE), exist_ok=True)
+        # Read existing data if file exists
+        if os.path.exists(INFO_FILE):
+            with open(INFO_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = {}
+
+        # Update JSON
+        data["subscribed_channel_list"] = subscribed_channel_list
+        with open(INFO_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+        print(f"Saved {len(subscribed_channel_list)} channels into {INFO_FILE}")
+        return subscribed_channel_list
 
     except HttpError as e:
-        print(f"Subscription check failed: {str(e)}")
+        print(f"Subscription fetch failed: {e}")
+        return []
+
+def is_subscribed(youtube, channel_id: str) -> bool:
+    # If file does not exist, create it with fresh subscriptions
+    if not os.path.exists(INFO_FILE):
+        print("api_derived.json does not exist. Creating it now...")
+        subscribed_list = get_subscribed_channel_list(youtube)
+    else:
+        with open(INFO_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # If key missing or empty, refetch
+        if "subscribed_channel_list" not in data or not data["subscribed_channel_list"]:
+            print("Subscription list missing or empty. Rebuilding...")
+            subscribed_list = get_subscribed_channel_list(youtube)
+        else:
+            subscribed_list = data["subscribed_channel_list"]
+
+    # Now compare locally
+    if channel_id in subscribed_list:
+        return True
+    else:
         return False
-    
+
 def get_channel_id(youtube, channel_url: str) -> str:
 
     # Check for numeric channel ID first
@@ -507,7 +546,13 @@ def main():
         if not own_channel_id:
            print("\n⏸ Stopping migration due to quota exhaustion.")
            return   # prevent parsing + wasted work
-        
+        choice = input("Have you subscribed to channels on youtube recently ? (Y/N)").strip().lower()
+        match choice:
+            case "n":
+                pass
+            case _:
+                get_subscribed_channel_list(youtube)
+
         activity = load_or_parse_takeout(PARSED_FILE, TAKEOUT_FILE)
         activity["subscribed"] = [url for url in activity["subscribed"] if own_channel_id not in url]
         print(f"\nMigration Targets:")
