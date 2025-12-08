@@ -31,7 +31,8 @@ API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 API_DELAY = 5  # Seconds between API calls
-MAX_SUBSCRIPTIONS_PER_RUN = 100  # Conservative default
+MAX_SUBSCRIPTIONS_PER_RUN = 50  # Conservative default
+MAX_LIKES_PER_RUN = 100
 QUOTA_LIMIT = 10000  # Daily quota limit (default, may vary per project)
 
 def banner():
@@ -60,7 +61,6 @@ def banner():
 
 if __name__ == "__main__":
     banner()
-
 
 # ---------------------------
 # HELPER FUNCTIONS
@@ -170,35 +170,6 @@ def handle_quota_error(e: Exception, operation: str) -> bool:
               f"at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
         return True
     return False
-
-
-def check_quota(operation: str) -> bool:
-    global current_quota, quota_reset_time, quota_time_left
-    cost = QUOTA_COSTS.get(operation, 50)
-    now = datetime.datetime.now(get_localzone())
-
-    # Prevent exceeding local quota
-    if current_quota + cost > QUOTA_LIMIT:
-        print(f"Local quota exhausted! Used {current_quota}/{QUOTA_LIMIT}")
-        print(f"Quota resets in {format_time_left(quota_time_left)} "
-              f"at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        return False
-
-    # reset logic
-    if now > quota_reset_time:
-        current_quota = 0
-        reset_time, time_left = get_next_reset()
-        quota_reset_time = reset_time
-        quota_time_left = time_left
-    else:
-        # recalc remaining time dynamically
-        quota_time_left = quota_reset_time - now
-
-    print(f"[Quota] Used: {current_quota}/{QUOTA_LIMIT} | "
-          f"Time left: {format_time_left(quota_time_left)}")
-
-    current_quota += cost
-    return True
 
 # ---------------------------
 # AUTHENTICATION
@@ -320,8 +291,6 @@ def load_or_parse_takeout(parsed_file: str, takeout_file: str) -> Dict[str, List
 # API OPERATIONS
 # ---------------------------
 def get_own_channel_id(youtube) -> str:
-    if not check_quota('channels.list'):
-        return ""
 
     try:
         response = youtube.channels().list(
@@ -480,9 +449,6 @@ def subscribe_channel(youtube, channel_url: str) -> bool:
         if is_subscribed(youtube, channel_id):
             print(f"⏭ Already subscribed: {channel_id}")
             return True
-
-        if not check_quota('subscriptions.insert'):
-            return False
         
         youtube.subscriptions().insert(
             part="snippet",
@@ -506,9 +472,6 @@ def subscribe_channel(youtube, channel_url: str) -> bool:
         return False
     
 def like_video(youtube, url: str, progress: dict) -> bool:
-    if not check_quota('videos.rate'):
-        return False
-    
     try:
         video_id = url.split("v=")[1]
         youtube.videos().rate(id=video_id, rating="like").execute()
@@ -560,40 +523,77 @@ def main():
         print(f"• Likes: {len(activity['liked'])}")
         print(f"• Watched: {len(activity['watched'])}")
 
+        # ---------------------------
+        # USER CONTROL
+        # ---------------------------
+        print("\nChoose what to run:")
+        print("1) Run only Likes")
+        print("2) Run only Subscriptions")
+        print("3) Run Likes then Subscriptions")
+        print("4) Run Subscriptions then Likes")
+
+        order = input("Enter choice (1/2/3/4): ").strip()
+
+        likes_limit = input("Max likes to process this run? (Press Enter for ALL): ").strip()
+        subs_limit = input("Max subscriptions to process this run? (Press Enter for ALL): ").strip()
+
+        likes_limit = int(likes_limit) if likes_limit.isdigit() else MAX_LIKES_PER_RUN
+        subs_limit = int(subs_limit) if subs_limit.isdigit() else MAX_SUBSCRIPTIONS_PER_RUN
+
     
         # ---------------------------
         # Subscription migration
         # ---------------------------
-        remaining_subs = len(activity["subscribed"]) - progress["subscriptions"]
-        if remaining_subs > 0:
-            batch = min(MAX_SUBSCRIPTIONS_PER_RUN, remaining_subs)
-            print(f"\nProcessing {batch} subscriptions (est. {batch * QUOTA_COSTS['subscriptions.insert']} quota units)")
-            
-            for url in activity["subscribed"][progress["subscriptions"]:progress["subscriptions"]+batch]:
-                if not check_quota("subscriptions.insert"):
-                    print("\n⏸ Quota exhausted during subscriptions. Progress saved.")
-                    break
+        def process_subscriptions():
+            remaining_subs = len(activity["subscribed"]) - progress["subscriptions"]
 
-                if subscribe_channel(youtube, url):
-                    progress["subscriptions"] += 1
-                    json.dump(progress, open(PROGRESS_FILE, "w"))
-                    time.sleep(API_DELAY)
+            if remaining_subs > 0:
+                batch = min(subs_limit, remaining_subs)
+                print(f"\nProcessing {batch} subscriptions (est. {batch * QUOTA_COSTS['subscriptions.insert']} quota units)")
+
+                for url in activity["subscribed"][progress["subscriptions"]:progress["subscriptions"] + batch]:
+                    if subscribe_channel(youtube, url):
+                        progress["subscriptions"] += 1
+                        json.dump(progress, open(PROGRESS_FILE, "w"))
+                        time.sleep(API_DELAY)
 
         # ---------------------------
         # Likes migration
         # ---------------------------
-        remaining_likes = len(activity["liked"]) - progress["likes"]
-        if remaining_likes > 0:
-            print(f"\nProcessing {remaining_likes} likes (est. {remaining_likes * QUOTA_COSTS['videos.rate']} quota units)")
-            
-            for url in activity["liked"][progress["likes"]:]:
-                if not check_quota("videos.rate"):
-                    print("\n⏸ Quota exhausted during likes. Progress saved.")
-                    break
+        def process_likes():
+            remaining_likes = len(activity["liked"]) - progress["likes"]
 
-                like_video(youtube, url, progress)
-                json.dump(progress, open(PROGRESS_FILE, "w"))
-                time.sleep(API_DELAY)
+            if remaining_likes > 0:
+                batch = min(likes_limit, remaining_likes)
+                print(f"\nProcessing {batch} likes (est. {batch * QUOTA_COSTS['videos.rate']} quota units)")
+
+                for url in activity["liked"][progress["likes"]:progress["likes"] + batch]:
+                    like_video(youtube, url, progress)
+                    progress["likes"] += 1
+                    json.dump(progress, open(PROGRESS_FILE, "w"))
+                    time.sleep(API_DELAY)
+
+        # ---------------------------
+        # Execute based on user choice
+        # ---------------------------
+        if order == "1":
+            process_likes()
+
+        elif order == "2":
+            process_subscriptions()
+
+        elif order == "3":
+            process_likes()
+            process_subscriptions()
+
+        elif order == "4":
+            process_subscriptions()
+            process_likes()
+
+        else:
+            print("Invalid choice! Defaulting to Likes then Subscriptions.")
+            process_subscriptions()
+            process_likes()
 
         # ---------------------------
         # Finalization
