@@ -154,7 +154,6 @@ def fetch_quota_costs() -> Dict[str, int]:
 # GLOBAL STATE
 # ---------------------------
 QUOTA_COSTS = fetch_quota_costs() # Dynamically load quota costs
-current_quota = 0
 reset_time, time_left = get_next_reset()
 quota_reset_time = reset_time
 quota_time_left = time_left
@@ -166,7 +165,8 @@ def handle_quota_error(e: Exception, operation: str) -> bool:
     """Centralized quota error handler"""
     if isinstance(e, HttpError) and "quotaExceeded" in str(e):
         print(f"Quota exhausted while performing '{operation}'")
-        print(f"Quota resets in {format_time_left(quota_time_left)} "
+        current_left = quota_reset_time - datetime.datetime.now(get_localzone())
+        print(f"Quota resets in {format_time_left(current_left)} "
               f"at {quota_reset_time.strftime('%Y-%m-%d %H:%M:%S')}")
         return True
     return False
@@ -300,10 +300,12 @@ def get_own_channel_id(youtube) -> str:
         ).execute()
         return response["items"][0]["id"]
     except Exception as e:
-        if handle_quota_error(e, "channels.list"):
-            return ""   # gracefully handled
-        print(f"Channel fetch failed: {str(e)}")
+        print(f"× Channel fetch failed (unexpected error): {str(e)}")
         return ""
+    except HttpError as e:
+        err = str(e)
+        if handle_quota_error(e, "channels.list"):
+            raise e  # bubble up to main() to stop
 
 def load_own_channel_id(info_file: str, youtube) -> str:
 
@@ -389,8 +391,12 @@ def get_subscribed_channel_list(youtube):
         return subscribed_channel_list
 
     except HttpError as e:
-        print(f"Subscription fetch failed: {e}")
+        err = str(e)
+        if handle_quota_error(e, "subscriptions.list"):
+            raise e
+        print(f"× Subscription fetch failed (HTTP error): {err}")
         return []
+
 
 def is_subscribed(youtube, channel_id: str) -> bool:
     # If file does not exist, create it with fresh subscriptions
@@ -408,7 +414,7 @@ def is_subscribed(youtube, channel_id: str) -> bool:
         else:
             subscribed_list = data["subscribed_channel_list"]
 
-    # Now compare locally
+    # Compare locally
     if channel_id in subscribed_list:
         return True
     else:
@@ -438,7 +444,7 @@ def get_channel_id(youtube, channel_url: str) -> str:
     return None
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+# @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def subscribe_channel(youtube, channel_url: str) -> bool:
     try:
         channel_id = get_channel_id(youtube, channel_url)
@@ -465,12 +471,19 @@ def subscribe_channel(youtube, channel_url: str) -> bool:
         return True
         
     except HttpError as e:
-        if "subscriptionDuplicate" in str(e):
+        err = str(e)
+        if handle_quota_error(e, "subscriptions.insert"):
+            raise e
+        if "subscriptionDuplicate" in err:
             print(f"Already subscribed (API validation): {channel_id}")
             return True
-        print(f"× Subscription error: {str(e)}")
+        if "publisherNotFound" in err:
+            print(f"× Channel not found: {channel_id}")
+            return False
+        print(f"× Subscription error: {err}")
         return False
     
+
 def like_video(youtube, url: str, progress: dict) -> bool:
     try:
         video_id = url.split("v=")[1]
@@ -480,12 +493,17 @@ def like_video(youtube, url: str, progress: dict) -> bool:
         return True
 
     except HttpError as e:
-        if "videoRatingDisabled" in str(e):
-            print(f"Skipping video (ratings disabled): {url}")
+        err = str(e)
+        if handle_quota_error(e, "videos.rate"): # return False but signal main() to stop
+            raise e
+        if "videoRatingDisabled" in err:
+            print(f"Skipping video (Do manually) (auto ratings disabled): {url}")
             progress["links"].append(url)
             return False
-        else:
+        if "notFound" in err:
             print(f"x Video Not available {url}")
+            return False
+        else:
             print(f"Error liking video {url}: {str(e)}")
             return False
         
