@@ -23,6 +23,7 @@ client_secret*.json
 progress.json
 parsed_activity.json
 api_derived.json
+config.json
 
 # macOS system files
 .DS_Store
