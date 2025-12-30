@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
 )
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, QTimer
 
 from .ui_form import Ui_MainWindow
 from core.migration_worker import MigrationWorker
@@ -132,6 +132,20 @@ class MainWindow(QMainWindow):
         self.update_upload_exclusivity()
         self.update_parse_data_mode_state()
         self.update_start_stop_state()
+        
+        # -------------------------
+        # DATA TAB AUTO-REFRESH
+        # -------------------------
+        # Connect tab change event to refresh data
+        self.ui.tab_main_navigation.currentChanged.connect(self.on_tab_changed)
+        
+        # Set up auto-refresh timer for data tabs (every 1 second for better responsiveness)
+        self.data_refresh_timer = QTimer(self)
+        self.data_refresh_timer.timeout.connect(self.refresh_all_data_tabs)  # Refresh ALL tabs
+        self.data_refresh_timer.start(1000)  # Refresh every 1 second
+        
+        # Load data tabs initially
+        self.refresh_all_data_tabs()
 
     # --------------------------------------------------
     # CONFIG MANAGEMENT
@@ -245,6 +259,10 @@ class MainWindow(QMainWindow):
             with open("data/config.json", "w") as f:
                 json.dump(config, f, indent=2)
             self.ui.log_output.appendPlainText("✓ Configuration saved")
+            
+            # Refresh config tab if it's visible
+            self.refresh_data_tab(self.ui.tab_7)
+            
         except Exception as e:
             self.ui.log_output.appendPlainText(f"✗ Error saving config: {str(e)}")
 
@@ -346,6 +364,9 @@ class MainWindow(QMainWindow):
         
         # Update parse data state (in case files were deleted)
         self.update_parse_data_mode_state()
+        
+        # Refresh all data tabs to show updated files
+        self.refresh_all_data_tabs()
 
     def on_migration_error(self, error_msg):
         """Handle migration errors"""
@@ -483,6 +504,102 @@ class MainWindow(QMainWindow):
         self.ui.le_client_secret.clear()
         self.update_start_stop_state()
         self.ui.log_output.appendPlainText("Client Secret cleared")
+
+    # --------------------------------------------------
+    # DATA TAB MANAGEMENT
+    # --------------------------------------------------
+    def on_tab_changed(self, index):
+        """Called when user switches tabs"""
+        # Get the current tab widget
+        current_tab = self.ui.tab_main_navigation.widget(index)
+        
+        # Refresh data if we're on a data tab (tab2-tab7)
+        if current_tab in [
+            self.ui.tab_2,  # parsed_activity
+            self.ui.tab_3,  # progress
+            self.ui.tab_4,  # token
+            self.ui.tab_5,  # api_derived
+            self.ui.tab_6,  # client_secret
+            self.ui.tab_7,  # user_config
+        ]:
+            self.refresh_data_tab(current_tab)
+    
+    def refresh_current_data_tab(self):
+        """Refresh currently visible data tab"""
+        current_index = self.ui.tab_main_navigation.currentIndex()
+        current_tab = self.ui.tab_main_navigation.widget(current_index)
+        self.refresh_data_tab(current_tab)
+    
+    def refresh_all_data_tabs(self):
+        """Refresh all data tabs"""
+        for tab in [
+            self.ui.tab_2,  # parsed_activity
+            self.ui.tab_3,  # progress
+            self.ui.tab_4,  # token
+            self.ui.tab_5,  # api_derived
+            self.ui.tab_6,  # client_secret
+            self.ui.tab_7,  # user_config
+        ]:
+            self.refresh_data_tab(tab)
+    
+    def refresh_data_tab(self, tab):
+        """Refresh content of a specific data tab"""
+        try:
+            # Map tabs to their editors and files
+            tab_mapping = {
+                self.ui.tab_2: ("data/parsed_activity.json", self.ui.editor_parsed_activity),
+                self.ui.tab_3: ("data/progress.json", self.ui.editor_progress),
+                self.ui.tab_4: ("data/token.json", self.ui.editor_token),
+                self.ui.tab_5: ("data/api_derived.json", self.ui.editor_api_derived),
+                self.ui.tab_6: ("data/client_secret.json", self.ui.editor_client_secret),
+                self.ui.tab_7: ("data/config.json", self.ui.editor_user_config),
+            }
+            
+            if tab not in tab_mapping:
+                return
+            
+            file_path, editor = tab_mapping[tab]
+            
+            # Check if file exists
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    
+                    # Pretty print JSON
+                    try:
+                        json_data = json.loads(content)
+                        formatted_content = json.dumps(json_data, indent=2)
+                        
+                        # Only update if content has changed (prevents flickering)
+                        current_text = editor.toPlainText()
+                        if current_text != formatted_content:
+                            # Save cursor position
+                            cursor = editor.textCursor()
+                            position = cursor.position()
+                            
+                            editor.setPlainText(formatted_content)
+                            
+                            # Restore cursor position if possible
+                            if position < len(formatted_content):
+                                cursor.setPosition(position)
+                                editor.setTextCursor(cursor)
+                    except json.JSONDecodeError:
+                        # Not valid JSON, display as-is
+                        if editor.toPlainText() != content:
+                            editor.setPlainText(content)
+                    
+                except Exception as e:
+                    error_msg = f"Error reading file: {str(e)}"
+                    if editor.toPlainText() != error_msg:
+                        editor.setPlainText(error_msg)
+            else:
+                not_found_msg = f"File not found: {file_path}\n\nThis file will be created when needed."
+                if editor.toPlainText() != not_found_msg:
+                    editor.setPlainText(not_found_msg)
+        
+        except Exception as e:
+            pass  # Silently fail if tab doesn't exist
 
 
 # --------------------------------------------------
