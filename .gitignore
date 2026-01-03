@@ -30,6 +30,7 @@ config.json
 
 # Activity files
 *.html
+*.csv
 
 # Extra
 notes.md
