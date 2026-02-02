@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  youtube-migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: youtube-migrator
+    volumes:
+      # Mount the data directory for persistent storage
+      - ./data:/app/data
+    environment:
+      # You can add environment variables here if needed
+      - PYTHONUNBUFFERED=1
+    stdin_open: true  # Keep stdin open for interactive prompts
+    tty: true         # Allocate a pseudo-TTY for colored output
+    restart: "no"     # Don't restart automatically
