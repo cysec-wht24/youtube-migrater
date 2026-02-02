@@ -219,14 +219,6 @@ This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) 
 
 ---
 
-## 👨‍💻 Author
-
-**Manomay Bisht**
-
-- GitHub: [@cysec-wht24](https://github.com/cysec-wht24)
-
----
-
 ## ⚠️ Disclaimer
 
 This tool is for personal use only. Use responsibly and in accordance with YouTube's Terms of Service. The authors are not responsible for any misuse or quota violations.
