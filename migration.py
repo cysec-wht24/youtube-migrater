@@ -179,6 +179,15 @@ def handle_quota_error(e: Exception, operation: str) -> bool:
 def get_authenticated_service():
     """Authenticate and return YouTube API service instance."""
 
+    IS_DOCKER = bool(os.environ.get("DOCKERIZED"))
+
+    def _run_flow(credentials_file):
+        flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
+        if IS_DOCKER:
+            return flow.run_console()        # headless: prints URL, reads code from stdin
+        else:
+            return flow.run_local_server(port=0)   # local: opens browser
+
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
@@ -189,17 +198,15 @@ def get_authenticated_service():
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-                creds = flow.run_local_server(port=0)
+                creds = _run_flow(CREDENTIALS_FILE)
         except RefreshError:
             print("Token expired or revoked. Re-authenticating...")
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        
+            creds = _run_flow(CREDENTIALS_FILE)
+
         os.makedirs("data", exist_ok=True)
         with open(TOKEN_FILE, "w") as token:
             token.write(creds.to_json())
-    
+
     return build(API_SERVICE_NAME, API_VERSION, credentials=creds)
 
 # ---------------------------

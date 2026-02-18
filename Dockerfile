@@ -6,7 +6,8 @@ WORKDIR /app
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    DOCKERIZED=true
 
 # Install system dependencies (if needed)
 RUN apt-get update && \

@@ -34,15 +34,31 @@ else
 fi
 echo ""
 
-# Check for client_secret.json
+# Check for client_secret.json — prompt to paste if missing
 if [ ! -f "data/client_secret.json" ]; then
     echo "⚠️  client_secret.json not found in data/ directory"
-    echo "   Please download it from Google Cloud Console and place it in data/"
-    echo "   Instructions: https://console.cloud.google.com/"
+    echo ""
+    echo "You can either:"
+    echo "  A) Place it manually at data/client_secret.json, then re-run this script"
+    echo "  B) Paste the JSON content now"
+    echo ""
+    read -p "Paste now? (y/n): " PASTE_NOW
+    if [[ "$PASTE_NOW" == "y" || "$PASTE_NOW" == "Y" ]]; then
+        echo "Paste your client_secret.json content below."
+        echo "When done, type END on a new line and press Enter:"
+        LINES=()
+        while IFS= read -r line; do
+            [[ "$line" == "END" ]] && break
+            LINES+=("$line")
+        done
+        printf '%s\n' "${LINES[@]}" > data/client_secret.json
+        echo "✅ client_secret.json saved to data/"
+    else
+        echo "⚠️  Skipping. Place client_secret.json in data/ before running the container."
+    fi
 else
     echo "✅ client_secret.json found"
 fi
-echo ""
 
 echo "🔨 Building Docker image..."
 docker build -t youtube-migrator . || {

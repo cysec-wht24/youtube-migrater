@@ -34,3 +34,4 @@ config.json
 
 # Extra
 notes.md
+!data/.gitkeep

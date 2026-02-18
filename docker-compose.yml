@@ -12,6 +12,7 @@ services:
     environment:
       # You can add environment variables here if needed
       - PYTHONUNBUFFERED=1
+      - DOCKERIZED=true
     stdin_open: true  # Keep stdin open for interactive prompts
     tty: true         # Allocate a pseudo-TTY for colored output
     restart: "no"     # Don't restart automatically
