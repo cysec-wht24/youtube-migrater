@@ -3,12 +3,10 @@
 <div align="center">
 
 ![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)
+![Docker](https://img.shields.io/badge/docker-supported-blue.svg)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
-![Status](https://img.shields.io/badge/status-active-success.svg)
 
-**Seamlessly migrate your YouTube data - subscriptions, likes, and watch history - from Google Takeout to a new account.**
-
-[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Configuration](#%EF%B8%8F-configuration) • [FAQ](#-faq)
+**Migrate your YouTube subscriptions, likes, and watch history from Google Takeout to a new account.**
 
 </div>
 
@@ -16,218 +14,139 @@
 
 ## ✨ Features
 
-- 🔄 **Multi-Format Support**: Parse HTML and CSV files from Google Takeout
-- 📊 **Intelligent Parsing**: Automatically detects and parses subscriptions, liked videos, and watch history
-- 🛡️ **Duplicate Prevention**: Smart merge system ensures no duplicate entries
-- 📈 **Progress Tracking**: Resume migrations from where you left off
-- 🎯 **Quota Management**: Built-in YouTube API quota monitoring and management
-- ⚡ **Batch Processing**: Control how many items to process per run
-- 🔐 **Secure Authentication**: OAuth 2.0 authentication with Google
-- 🎨 **User-Friendly**: Interactive prompts and colorful console output
+- 🔄 Multi-format support: HTML and CSV from Google Takeout
+- 🛡️ Duplicate prevention via set operations
+- 📈 Progress tracking — resume anytime
+- 🎯 Built-in API quota monitoring
+- 🐳 Docker support — no Python needed
 
 ---
 
-## 📋 Prerequisites
+## 📋 Before You Start
 
-- Python 3.8 or higher
-- A Google Cloud Project with YouTube Data API v3 enabled
-- Google Takeout data (HTML or CSV format)
+Regardless of cloned or Docker mode, you need:
+
+1. **Google API credentials** — [Google Cloud Console](https://console.cloud.google.com/) → Enable YouTube Data API v3 → Create OAuth 2.0 Client ID (Desktop app) → Download JSON → rename to `client_secret.json`
+2. **Takeout data** — [takeout.google.com](https://takeout.google.com) → Export YouTube data (subscriptions, liked videos, watch history) → extract files
 
 ---
 
-## 🚀 Installation
+## 🚀 Quick Start
 
-### 1. Clone the Repository
+### Option A — Cloned (Python)
 
 ```bash
 git clone https://github.com/cysec-wht24/youtube-migrator.git
 cd youtube-migrator
-```
-
-### 2. Install Dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 3. Set Up Google API Credentials
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable **YouTube Data API v3**
-4. Create OAuth 2.0 credentials (Desktop app)
-5. Download the credentials JSON file
-6. Rename it to `client_secret.json` and place it in the `data/` folder
-
-### 4. Export Your YouTube Data
-
-1. Visit [Google Takeout](https://takeout.google.com/)
-2. Deselect all, then select only **YouTube and YouTube Music**
-3. Click "All YouTube data included" and select:
-   - ✅ subscriptions
-   - ✅ liked videos
-   - ✅ watch history
-4. Choose delivery method and export
-5. Extract the files and place them in the `data/` folder
-
----
-
-## 📖 Usage
-
-### Basic Usage
+Place `client_secret.json` and Takeout files in `data/`, then:
 
 ```bash
 python migration.py
 ```
 
-### Workflow
+A browser opens automatically for Google OAuth on first run.
 
-1. **Authentication**: The script will open a browser for Google OAuth login (first run only)
-2. **File Detection**: Automatically detects available HTML and CSV files in `data/` folder
-3. **File Selection**: Choose which file to parse (e.g., `subscriptions.csv`, `MyActivity.html`)
-4. **Migration Options**: Select what to migrate (likes, subscriptions, or both)
-5. **Processing**: The script processes your data with progress indicators
+---
+
+### Option B — Docker (No Python Required)
+
+```bash
+docker pull ghcr.io/cysec-wht24/youtube-migrator:main
+mkdir data
+# place client_secret.json and Takeout files in data/
+docker run -it --rm -v $(pwd)/data:/app/data ghcr.io/cysec-wht24/youtube-migrator:main
+```
+
+**First run:** A URL is printed — open it in your browser, log into the account you're migrating **to**, paste the code back. `token.json` is saved to `data/` and OAuth is skipped on all future runs.
+
+> Or build locally: `./setup-docker.sh` — checks Docker, prompts for `client_secret.json` if missing, and builds the image.
+
+---
+
+## 📂 Data Folder
+
+```
+data/
+├── client_secret.json        ← you provide (never committed to git)
+├── token.json                ← auto-generated after first OAuth
+├── MyActivity.html           ← Takeout file (optional)
+├── subscriptions.csv         ← Takeout file (optional)
+├── music library songs.csv   ← Takeout file (optional)
+├── progress.json             ← auto-generated (resume state)
+└── parsed_activity.json      ← auto-generated (cache)
+```
+
+---
+
+## 📖 Usage
+
+On each run the script will ask:
+
+1. Which Takeout file to parse
+2. What to migrate: likes, subscriptions, or both
+3. How many items to process this run
+
+Quota and progress are saved automatically after each operation.
 
 ### Supported File Formats
 
-| File Type | Description | Parsed Data |
-|-----------|-------------|-------------|
-| `MyActivity.html` | Complete YouTube activity | Subscriptions, Likes, Watch History |
-| `subscriptions.csv` | Channel subscriptions | Subscriptions |
-| `music library songs.csv` | Music library | Liked Videos |
+| File | Data |
+|------|------|
+| `MyActivity.html` | Subscriptions, Likes, Watch History |
+| `subscriptions.csv` | Subscriptions |
+| `music library songs.csv` | Liked Videos |
 
 ---
 
 ## ⚙️ Configuration
 
-Edit the constants at the top of `migration.py`:
+Edit constants at the top of `migration.py`:
 
 ```python
-API_DELAY = 5  # Seconds between API calls
-MAX_SUBSCRIPTIONS_PER_RUN = 50  # Max subscriptions per run
-MAX_LIKES_PER_RUN = 100  # Max likes per run
-QUOTA_LIMIT = 10000  # Daily YouTube API quota limit
+API_DELAY = 5                  # Seconds between API calls
+MAX_SUBSCRIPTIONS_PER_RUN = 50
+MAX_LIKES_PER_RUN = 100
+QUOTA_LIMIT = 10000            # Daily YouTube API quota
 ```
-
----
-
-## 📂 Project Structure
-
-```
-youtube-migrator/
-│
-├── migration.py              # Main script
-├── requirements.txt          # Python dependencies
-├── README.md                 # This file
-│
-└── data/                     # Data directory (create this)
-    ├── client_secret.json    # Google API credentials (you provide)
-    ├── token.json            # OAuth token (auto-generated)
-    ├── MyActivity.html       # YouTube Takeout HTML (optional)
-    ├── subscriptions.csv     # Subscriptions CSV (optional)
-    ├── music library songs.csv  # Music library CSV (optional)
-    ├── parsed_activity.json  # Parsed data (auto-generated)
-    ├── progress.json         # Migration progress (auto-generated)
-    └── api_derived.json      # API data cache (auto-generated)
-```
-
----
-
-## 🔧 How It Works
-
-### 1. **File Detection & Parsing**
-The script scans the `data/` folder for HTML and CSV files, then parses them based on format:
-- HTML: Extracts links and activity types
-- CSV: Reads structured data (Channel IDs, Video IDs)
-
-### 2. **Duplicate Prevention**
-Uses set operations to merge new data with existing data, ensuring each URL appears only once.
-
-### 3. **API Operations**
-- **Subscriptions**: Uses `subscriptions.insert` (50 quota per request)
-- **Likes**: Uses `videos.rate` (50 quota per request)
-- Includes retry logic and quota monitoring
-
-### 4. **Progress Tracking**
-Saves progress after each successful operation, allowing you to resume if interrupted.
-
----
-
-## 💡 Tips & Best Practices
-
-- **Start Small**: Test with a small batch first (e.g., 10 subscriptions)
-- **Monitor Quota**: The default quota is 10,000 units/day, which resets at midnight Pacific Time
-- **Run Daily**: Process data in batches to stay within quota limits
-- **Keep Backups**: Don't delete your Takeout files until migration is complete
-- **CSV Advantages**: CSV files are faster to parse than large HTML files
 
 ---
 
 ## ❓ FAQ
 
-### Q: What's the YouTube API quota limit?
-**A:** Default is 10,000 units/day. Each subscription costs 50 units, each like costs 50 units.
+**Q: Will this create duplicates?**
+No — set operations prevent duplicates across runs.
 
-### Q: Can I run this multiple times?
-**A:** Yes! Progress is saved automatically. You can resume anytime.
+**Q: What's the quota limit?**
+10,000 units/day. Each subscription or like costs 50 units (~200 subs/day).
 
-### Q: Will this create duplicates?
-**A:** No. The script uses set operations to prevent duplicates.
+**Q: Quota exceeded?**
+Script tells you exactly when it resets (midnight Pacific Time). Re-run then — progress is saved.
 
-### Q: What if I hit the quota limit?
-**A:** The script detects quota errors and shows when the quota resets (midnight Pacific Time).
+**Q: Is `client_secret.json` safe in Docker?**
+Yes. It's mounted at runtime via a volume — never baked into the image, never committed to git.
 
-### Q: Can I parse multiple files?
-**A:** Yes. Run the script multiple times and select different files. Data merges automatically.
-
-### Q: Does this work with Brand Accounts?
-**A:** Yes, as long as you authenticate with the correct Google account.
+**Q: Why does Docker print a URL instead of opening a browser?**
+Containers have no display. It's a one-time step — after that `token.json` handles auth automatically.
 
 ---
 
 ## 🐛 Troubleshooting
 
-### "Quota exceeded" error
-Wait until midnight Pacific Time for quota reset, or request a quota increase from Google.
-
-### "Channel not found" error
-The channel may have been deleted or made private. The script will skip it automatically.
-
-### Authentication issues
-Delete `data/token.json` and re-run the script to re-authenticate.
-
-### Parse errors
-Ensure your Takeout files are properly extracted and in the `data/` folder.
+| Problem | Fix |
+|---------|-----|
+| Auth issues | Delete `data/token.json` and re-run |
+| Quota exceeded | Wait for midnight Pacific Time reset |
+| Channel not found | Deleted/private channel — auto-skipped |
+| Parse errors | Ensure Takeout files are extracted into `data/` |
 
 ---
 
-## 🤝 Contributing
+## 📜 License & Disclaimer
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-## 📜 License
-
-This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## ⚠️ Disclaimer
-
-This tool is for personal use only. Use responsibly and in accordance with YouTube's Terms of Service. The authors are not responsible for any misuse or quota violations.
-
----
-
-## 🌟 Star History
-
-If this project helped you, please consider giving it a ⭐!
+GPL-3.0 — personal use only. Use responsibly and in accordance with YouTube's Terms of Service.
 
 ---
 
