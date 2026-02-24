@@ -179,14 +179,26 @@ def handle_quota_error(e: Exception, operation: str) -> bool:
 def get_authenticated_service():
     """Authenticate and return YouTube API service instance."""
 
-    IS_DOCKER = bool(os.environ.get("DOCKERIZED"))
+    IS_DOCKER = os.path.exists("/.dockerenv")
 
     def _run_flow(credentials_file):
         flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
+
         if IS_DOCKER:
-            return flow.run_console()        # headless: prints URL, reads code from stdin
+            auth_url, _ = flow.authorization_url(
+                prompt='consent',
+                access_type='offline'
+            )
+
+            print("\nOpen this URL in your browser to authorize:\n")
+            print(auth_url)
+            print("\nPaste the authorization code below:\n")
+
+            code = input("Authorization code: ").strip()
+            flow.fetch_token(code=code)
+            return flow.credentials
         else:
-            return flow.run_local_server(port=0)   # local: opens browser
+            return flow.run_local_server(port=0)
 
     creds = None
     if os.path.exists(TOKEN_FILE):
