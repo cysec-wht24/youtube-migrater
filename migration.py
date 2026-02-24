@@ -185,18 +185,7 @@ def get_authenticated_service():
         flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
 
         if IS_DOCKER:
-            auth_url, _ = flow.authorization_url(
-                prompt='consent',
-                access_type='offline'
-            )
-
-            print("\nOpen this URL in your browser to authorize:\n")
-            print(auth_url)
-            print("\nPaste the authorization code below:\n")
-
-            code = input("Authorization code: ").strip()
-            flow.fetch_token(code=code)
-            return flow.credentials
+            return flow.run_local_server(host="0.0.0.0", port=8080)
         else:
             return flow.run_local_server(port=0)
 
