@@ -15,7 +15,7 @@ from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import InstalledAppFlow, Flow
 from tenacity import retry, stop_after_attempt, wait_exponential
 from googleapiclient.errors import HttpError
 
@@ -183,7 +183,7 @@ def get_authenticated_service():
 
     def _run_flow(credentials_file):
         if IS_DOCKER:
-            from google_auth_oauthlib.flow import Flow
+            os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
             flow = Flow.from_client_secrets_file(credentials_file, SCOPES, redirect_uri="http://localhost:8080")
             auth_url, _ = flow.authorization_url(prompt="consent")
             print(f"Please visit this URL to authorize this application: {auth_url}")
