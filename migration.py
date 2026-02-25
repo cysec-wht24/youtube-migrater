@@ -186,9 +186,10 @@ def get_authenticated_service():
 
         if IS_DOCKER:
             return flow.run_local_server(
-                host="0.0.0.0",
+                host="localhost",
                 port=8080,
                 open_browser=False,
+                redirect_uri_trailing_slash=False
             )
         else:
             return flow.run_local_server(port=0)
