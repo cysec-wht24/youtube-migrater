@@ -187,11 +187,10 @@ def get_authenticated_service():
         if IS_DOCKER:
             flow.redirect_uri = "http://localhost:8080"
             return flow.run_local_server(
-                host="0.0.0.0",  # bind on all interfaces so Windows can reach Docker
+                host="0.0.0.0",
                 port=8080,
                 open_browser=False,
-                redirect_uri_trailing_slash=False,
-                authorization_prompt_message=None  # suppress extra prompts
+                redirect_uri_trailing_slash=False
             )
         else:
             return flow.run_local_server(port=0)
