@@ -182,17 +182,37 @@ def get_authenticated_service():
     IS_DOCKER = os.path.exists("/.dockerenv")
 
     def _run_flow(credentials_file):
-        flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
-
         if IS_DOCKER:
-            flow.redirect_uri = "http://localhost:8080"
-            return flow.run_local_server(
-                host="0.0.0.0",
-                port=8080,
-                open_browser=False,
-                redirect_uri_trailing_slash=False
-            )
+            from google_auth_oauthlib.flow import Flow
+            flow = Flow.from_client_secrets_file(credentials_file, SCOPES, redirect_uri="http://localhost:8080")
+            auth_url, _ = flow.authorization_url(prompt="consent")
+            print(f"Please visit this URL to authorize this application: {auth_url}")
+
+            from http.server import HTTPServer, BaseHTTPRequestHandler
+            from urllib.parse import urlparse, parse_qs
+
+            auth_code = {}
+
+            class Handler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    auth_code['full_url'] = f"http://localhost:8080{self.path}"
+                    parsed = urlparse(self.path)
+                    params = parse_qs(parsed.query)
+                    auth_code['code'] = params.get('code', [None])[0]
+                    auth_code['state'] = params.get('state', [None])[0]
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"Authentication complete. You may close this window.")
+                def log_message(self, format, *args):
+                    pass
+
+            server = HTTPServer(("0.0.0.0", 8080), Handler)
+            server.handle_request()
+
+            flow.fetch_token(authorization_response=auth_code['full_url'])
+            return flow.credentials
         else:
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
             return flow.run_local_server(port=0)
 
     creds = None
