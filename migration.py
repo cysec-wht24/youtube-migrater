@@ -185,12 +185,10 @@ def get_authenticated_service():
         flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
 
         if IS_DOCKER:
-            flow.redirect_uri = "http://localhost:8080/"
             return flow.run_local_server(
                 host="0.0.0.0",
                 port=8080,
                 open_browser=False,
-                redirect_uri_trailing_slash=False
             )
         else:
             return flow.run_local_server(port=0)
